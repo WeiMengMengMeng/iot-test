@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIoT 手機感測器發送器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; }
+        #data-display { font-size: 1.2em; margin: 20px; color: #333; }
+        button { padding: 15px 30px; font-size: 1em; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        #status { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>手機 MQTT 數據傳送</h1>
+    <p>狀態：<span id="status">未連線</span></p>
+    <button id="startBtn">啟動感測器並連線</button>
+    
+    <div id="data-display">
+        X: <span id="x">0</span><br>
+        Y: <span id="y">0</span><br>
+        Z: <span id="z">0</span>
+    </div>
+
+    <script>
+        // 設定 MQTT Broker (使用 WebSocket 專用 Port: 8083)
+        const hostname = "broker.emqx.io";
+        const port = 8083; 
+        const topic = "iot/myname/accel"; // 請改成你自己的 topic
+        const clientId = "client_" + Math.random().toString(16).substr(2, 8);
+
+        let client = new Paho.MQTT.Client(hostname, port, clientId);
+
+        // 當連線失敗時
+        client.onConnectionLost = (responseObject) => {
+            document.getElementById('status').innerText = "連線中斷: " + responseObject.errorMessage;
+        };
+
+        const startBtn = document.getElementById('startBtn');
+
+        startBtn.onclick = function() {
+            // 1. 請求手機感測器權限 (iOS 13+ 必備)
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            connectMQTT();
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // 一般 Android 或其他瀏覽器直接連線
+                connectMQTT();
+            }
+        };
+
+        function connectMQTT() {
+            client.connect({
+                onSuccess: () => {
+                    document.getElementById('status').innerText = "已連線至 Broker";
+                    document.getElementById('status').style.color = "green";
+                    startStreaming();
+                },
+                useSSL: false // 公共測試用通常不加密，若不行可試試 true
+            });
+        }
+
+        function startStreaming() {
+            window.addEventListener('devicemotion', (event) => {
+                let x = event.accelerationIncludingGravity.x || 0;
+                let y = event.accelerationIncludingGravity.y || 0;
+                let z = event.accelerationIncludingGravity.z || 0;
+
+                // 更新網頁顯示
+                document.getElementById('x').innerText = x.toFixed(2);
+                document.getElementById('y').innerText = y.toFixed(2);
+                document.getElementById('z').innerText = z.toFixed(2);
+
+                // 2. 封裝成 JSON 格式並發送 MQTT
+                let payload = JSON.stringify({ x: x, y: y, z: z });
+                let message = new Paho.MQTT.Message(payload);
+                message.destinationName = topic;
+                client.send(message);
+            });
+        }
+    </script>
+</body>
+</html>
